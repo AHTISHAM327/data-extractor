@@ -1,0 +1,23 @@
+From: billing@acme-supplies.com
+To: john@example.com
+Subject: Invoice #INV-2024-0512
+
+Dear John Smith,
+
+Please find your invoice details below.
+
+Invoice Number: INV-2024-0512
+Order Date: May 12, 2024
+Due Date: June 15, 2024
+
+Items:
+- Web Design Services (20hrs @ $18.00): $360.00
+- Domain Registration (1 year): $12.99
+- SSL Certificate: $78.00
+
+Total Amount Due: $450.99
+
+Payment methods: bank transfer or PayPal (billing@acme-supplies.com)
+
+Thank you for your business.
+ACME Supplies Ltd.
