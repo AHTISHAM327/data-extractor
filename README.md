@@ -1,88 +1,114 @@
-# data-extractor
+# Data Extractor CLI
 
-Extract structured data from messy invoice and receipt text using AI.
+> Extract structured JSON from invoices, receipts, and emails. Handles messy real-world documents — inconsistent formatting, missing fields, mixed date formats.
 
-Businesses receive hundreds of invoices and receipts every month, buried in unstructured emails and documents. Copying fields into spreadsheets by hand wastes hours and introduces errors. This tool automates that — paste in messy text, get clean JSON fields back instantly.
+## What It Does
+
+Reads an unstructured text document and returns clean, typed JSON. Uses Google Gemini to understand context, normalize dates, and identify implicit fields. Returns `null` for missing values — never invents data.
+
+**Built for:**
+- Finance teams extracting data from vendor invoices
+- E-commerce workflows parsing customer receipts
+- Support teams extracting action items from email threads
+- Any pipeline that needs structured data from unstructured text
+
+## Supported Schemas
+
+| Schema | `--schema` | Key Fields Extracted |
+|--------|-----------|---------------------|
+| Invoice | `invoice` (default) | invoice_number, vendor, customer, amounts, dates, line_items |
+| Receipt | `receipt` | merchant, address, items, subtotal, tax, total, payment_method |
+| Email | `email` | sender, recipient, subject, action_items, deadline, urgency |
 
 ## Setup
 
-1. Install dependencies:
-   ```bash
-   python3 -m pip install -r requirements.txt
-   ```
-2. Get a free Gemini API key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) (no credit card needed).
-3. Create a `.env` file in the project root:
-   ```
-   GEMINI_API_KEY=your_key_here
-   ```
+**Requirements:** Python 3.9+, a free [Google AI Studio API key](https://aistudio.google.com/apikey)
+
+```bash
+git clone https://github.com/AHTISHAM327/data-extractor.git
+cd data-extractor
+python3 -m pip install -r requirements.txt
+cp .env.example .env
+# Open .env and add your key
+```
+
+`.env` file:
+```
+GEMINI_API_KEY=your_key_here
+```
 
 ## Usage
 
 ```bash
+# Extract invoice data (default schema)
+python3 main.py --file invoice.txt
+
+# Extract receipt data
+python3 main.py --file receipt.txt --schema receipt
+
+# Extract email action items
+python3 main.py --file email.txt --schema email
+
+# The file path also works as a positional argument
 python3 main.py invoice.txt
-```
-
-Output is JSON printed to stdout. Save it to a file with:
-
-```bash
-python3 main.py invoice.txt > output.json
 ```
 
 ## Example
 
-Input:
-
+**Input** (`email.txt`):
 ```
-Hi, just following up on the outstanding balance for Rivera Consulting.
-Invoice REF-8841 was issued on March 3, 2025 covering last quarter's
-maintenance work. The total comes to $1,240.50 and payment is due by
-April 2, 2025. Let us know if anything looks off — happy to resend
-the original PDF. Thanks, Accounts Team.
+From: Sarah Chen 
+Subject: URGENT: Report due July 16th
+Please update the Q3 projections and get legal sign-off by EOD Thursday.
 ```
 
-Output:
-
+**Output:**
 ```json
 {
-  "invoice_number": "REF-8841",
-  "customer_name": "Rivera Consulting",
-  "customer_email": null,
-  "total_amount": 1240.50,
-  "order_date": "2025-03-03",
-  "due_date": "2025-04-02"
+  "sender_name": "Sarah Chen",
+  "sender_email": "sarah@acme.com",
+  "subject": "URGENT: Report due July 16th",
+  "action_items": [
+    "Update Q3 projections",
+    "Get legal sign-off"
+  ],
+  "deadline": "2026-07-16",
+  "urgency": "high"
 }
 ```
 
-## Fields Extracted
+## Error Behavior
 
-- `invoice_number`
-- `customer_name`
-- `customer_email`
-- `total_amount`
-- `order_date`
-- `due_date`
+| Situation | Output |
+|-----------|--------|
+| File not found | ❌ error to stderr, exit 1 |
+| Empty file | ❌ error to stderr, exit 1 |
+| Missing API key | ❌ error to stderr, exit 1 |
+| Model busy or rate-limited | ⚠️ warning to stderr, automatically falls back to the next model |
+| All models busy | ❌ "Wait a minute" message, exit 1 |
+| Invalid schema | ❌ lists valid schemas, exit 1 |
+| Missing field in document | Field is `null` in output — never hallucinated |
 
-Missing fields are returned as null — never hallucinated.
+## Tech Stack
 
-## Error Handling
+- **LLM:** Google Gemini free tier with automatic fallback (`gemini-3.1-flash-lite` → `gemini-2.0-flash-lite` → `gemini-2.0-flash`)
+- **Schema logic:** All prompts in `prompts.py`, zero logic in prompts
+- **Output:** Always valid JSON to stdout, errors to stderr
 
-Every failure exits with code 1 and a clear message on stderr:
+## Project Structure
 
-- **File problems** — missing file, path is a directory, or empty file.
-- **Configuration** — `GEMINI_API_KEY` not set in `.env`.
-- **API failures** — rate limits (429), client/server errors, and network outages are caught and reported.
-- **Bad model output** — non-JSON or empty responses are rejected instead of printed.
+```
+data-extractor/
+├── main.py              # CLI + core extraction logic
+├── prompts.py           # Schema-specific extraction prompts
+├── requirements.txt
+├── .env.example         # Copy to .env and add your key
+├── .gitignore
+├── sample_invoice.txt   # Invoice test file
+├── test_receipt.txt     # Receipt test file
+└── test_email.txt       # Email test file
+```
 
-## Status
+## License
 
-- [x] File loading
-- [x] Error handling
-- [x] Gemini API integration
-- [x] JSON output
-- [x] Null handling for missing fields
-- [ ] Batch mode (process a folder of invoices)
-- [ ] Custom field definitions via config file
-
-## Cost
-
-Built on free tiers only — Gemini API free tier. $0.00 spent.
+MIT
