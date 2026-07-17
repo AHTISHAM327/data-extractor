@@ -1,0 +1,13 @@
+WALMART SUPERCENTER
+1234 Main St, Springfield, IL 62701
+Date: 07/14/2026  Time: 14:32
+---------------------------------
+Apples x3          $4.50
+Bread               $2.99
+Milk 1gal           $3.79
+---------------------------------
+Subtotal:          $11.28
+Tax (8%):           $0.90
+TOTAL:             $12.18
+Payment: VISA ending 4521
+Thank you for shopping!
