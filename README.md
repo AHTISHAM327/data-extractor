@@ -4,7 +4,7 @@
 
 ## What It Does
 
-Reads an unstructured text document and returns clean, typed JSON. Uses Google Gemini to understand context, normalize dates, and identify implicit fields. Returns `null` for missing values — never invents data.
+Reads an unstructured text document — or a whole folder of them — and returns clean, typed JSON. Uses Google Gemini to understand context, normalize dates, and identify implicit fields. Returns `null` for missing values — never invents data.
 
 **Built for:**
 - Finance teams extracting data from vendor invoices
@@ -51,7 +51,25 @@ python3 main.py --file email.txt --schema email
 
 # The file path also works as a positional argument
 python3 main.py invoice.txt
+
+# Batch mode: process every .txt file in a directory
+python3 main.py --folder ./invoices --schema invoice
 ```
+
+### Batch Mode (`--folder`)
+
+`--folder` runs the same extraction pipeline on every `.txt` file in a directory (sorted by name) and prints a single JSON object keyed by filename:
+
+```json
+{
+  "invoice_001.txt": { "invoice_number": "INV-001", "total_amount": 174.5 },
+  "invoice_002.txt": { "invoice_number": "INV-002", "total_amount": 320.0 }
+}
+```
+
+- One `--schema` applies to the whole batch, so group files by document type before running.
+- Files that fail (empty, unreadable, API error) are skipped with a warning on stderr — the rest of the batch still completes.
+- `--file` and `--folder` are mutually exclusive.
 
 ## Example
 
@@ -88,6 +106,11 @@ Please update the Q3 projections and get legal sign-off by EOD Thursday.
 | All models busy | ❌ "Wait a minute" message, exit 1 |
 | Invalid schema | ❌ lists valid schemas, exit 1 |
 | Missing field in document | Field is `null` in output — never hallucinated |
+| `--folder` path is not a directory | ❌ error to stderr, exit 1 |
+| `--folder` directory has no `.txt` files | ❌ error to stderr, exit 1 |
+| One file in a batch fails | ⚠️ warning to stderr, file skipped, batch continues |
+| Every file in a batch fails | ❌ exit 1 |
+| `--file` and `--folder` together | ❌ argparse error, exit 2 |
 
 ## Tech Stack
 
@@ -106,8 +129,30 @@ data-extractor/
 ├── .gitignore
 ├── sample_invoice.txt   # Invoice test file
 ├── test_receipt.txt     # Receipt test file
-└── test_email.txt       # Email test file
+├── test_email.txt       # Email test file
+└── data-extractor-tests/  # 17 edge-case test documents (all schemas)
 ```
+
+## Testing
+
+The `data-extractor-tests/` folder contains 17 test documents named `<schema>_<scenario>.txt`, covering standard cases and edge cases (missing fields, messy formatting, foreign currency, no line items).
+
+```bash
+# Single file
+python3 main.py --file data-extractor-tests/invoice_messy.txt --schema invoice
+
+# Batch: group files by schema, then run one batch per schema
+mkdir -p batch-tests/invoice batch-tests/receipt batch-tests/email
+cp data-extractor-tests/invoice_*.txt batch-tests/invoice/
+cp data-extractor-tests/receipt_*.txt batch-tests/receipt/
+cp data-extractor-tests/email_*.txt batch-tests/email/
+
+python3 main.py --folder batch-tests/invoice --schema invoice
+python3 main.py --folder batch-tests/receipt --schema receipt
+python3 main.py --folder batch-tests/email --schema email
+```
+
+Exit codes: `0` success, `1` failure, `2` invalid arguments. Note: the free Gemini tier rate-limits after ~15 rapid requests; if later files in a batch are skipped with rate-limit warnings, wait a minute and rerun them.
 
 ## License
 
