@@ -2,11 +2,21 @@ import argparse
 import os
 import sys
 import json
-import httpx
-from dotenv import load_dotenv
-from google import genai
-from google.genai import errors as genai_errors
-from prompts import get_extract_prompt
+import threading
+
+# The third-party imports (google-genai in particular) take over a
+# second to load, so a Ctrl+C during startup would land before the
+# KeyboardInterrupt handler at the bottom of this file exists. Guard
+# them so an early Ctrl+C still gets the clean goodbye, not a traceback.
+try:
+    import httpx
+    from dotenv import load_dotenv
+    from google import genai
+    from google.genai import errors as genai_errors
+    from prompts import get_extract_prompt
+except KeyboardInterrupt:
+    print("\n👋 Extraction cancelled. Goodbye!", file=sys.stderr)
+    sys.exit(130)
 
 load_dotenv()
 # Tried in order; free-tier models with lighter demand come first so a
@@ -27,6 +37,12 @@ def load_file(file_path):
         str: The full text content of the file on success.
         None: If the file is missing, is a directory, or is empty. A
             descriptive error message is written to stderr in each case.
+
+    Raises:
+        OSError: If the file cannot be read for a reason other than being
+            missing or a directory (e.g. a permission error).
+        UnicodeDecodeError: If the file is not valid text in the default
+            encoding.
     """
     try:
         with open(file_path, "r") as f:
@@ -42,6 +58,73 @@ def load_file(file_path):
         return None
     print(f"📄 Loaded: {file_path} ({len(content)} chars)")
     return content
+
+
+def _spin(stop: threading.Event) -> None:
+    """Animate an extracting indicator until stop is set, then clear the line.
+
+    Drawn on stderr so stdout stays machine-readable JSON.
+
+    Args:
+        stop (threading.Event): Event that, when set, ends the animation
+            loop and clears the spinner line.
+
+    Returns:
+        None.
+
+    Raises:
+        Does not raise under normal operation.
+    """
+    frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    i = 0
+    while not stop.is_set():
+        print(
+            f"\r🔎 {frames[i % len(frames)]} extracting…",
+            end="",
+            file=sys.stderr,
+            flush=True,
+        )
+        i += 1
+        stop.wait(0.1)
+    print("\r\033[K", end="", file=sys.stderr, flush=True)
+
+
+def _start_spinner() -> tuple[threading.Event, threading.Thread]:
+    """Start the extracting spinner in a background thread.
+
+    Args:
+        None.
+
+    Returns:
+        tuple[threading.Event, threading.Thread]: The stop event used to
+            signal the spinner to halt, and the daemon thread running the
+            animation.
+
+    Raises:
+        RuntimeError: If a new thread cannot be started.
+    """
+    stop = threading.Event()
+    thread = threading.Thread(target=_spin, args=(stop,), daemon=True)
+    thread.start()
+    return stop, thread
+
+
+def _stop_spinner(stop: threading.Event, thread: threading.Thread) -> None:
+    """Stop the spinner and wait for it to clear its line. Safe to call twice.
+
+    Args:
+        stop (threading.Event): The stop event returned by _start_spinner.
+        thread (threading.Thread): The spinner thread returned by
+            _start_spinner.
+
+    Returns:
+        None.
+
+    Raises:
+        Does not raise under normal operation.
+    """
+    stop.set()
+    thread.join()
 
 
 def extract_data(text, schema: str = "invoice"):
@@ -64,6 +147,9 @@ def extract_data(text, schema: str = "invoice"):
         None: If the API key is missing, the schema is invalid, the API
             returns a client or server error, a network error occurs, or
             the response is empty.
+
+    Raises:
+        Does not raise. All exceptions are caught internally.
     """
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
@@ -80,33 +166,45 @@ def extract_data(text, schema: str = "invoice"):
     client = genai.Client(api_key=api_key)
     response = None
     for model_name in MODEL_NAMES:
+        stop, spinner = _start_spinner()
         try:
             response = client.models.generate_content(model=model_name, contents=prompt)
             break
         except genai_errors.ClientError as e:
+            _stop_spinner(stop, spinner)
             if e.code == 429:
                 print(
                     f"⚠️  {model_name}: rate limit reached, trying next model...",
                     file=sys.stderr,
                 )
                 continue
+            if e.code == 404:
+                print(
+                    f"⚠️  {model_name}: model unavailable, trying next model...",
+                    file=sys.stderr,
+                )
+                continue
             print(f"❌ Error: API error: {e.message}", file=sys.stderr)
             return None
         except genai_errors.ServerError as e:
+            _stop_spinner(stop, spinner)
             print(
                 f"⚠️  {model_name}: server busy ({e.message}), trying next model...",
                 file=sys.stderr,
             )
             continue
         except httpx.RequestError:
+            _stop_spinner(stop, spinner)
             print(
                 "❌ Error: Network error. Check your internet connection.",
                 file=sys.stderr,
             )
             return None
+        finally:
+            _stop_spinner(stop, spinner)
     if response is None:
         print(
-            "❌ Error: All models are busy or rate-limited. Wait a minute and try again.",
+            "❌ Error: All models are unavailable, busy, or rate-limited. Wait a minute and try again.",
             file=sys.stderr,
         )
         return None
@@ -127,6 +225,9 @@ def parse_json(raw):
         dict: The parsed JSON data on success.
         None: If the string is not valid JSON. The first 120 characters of
             the offending input are written to stderr for debugging.
+
+    Raises:
+        Does not raise. All exceptions are caught internally.
     """
     try:
         return json.loads(raw)
@@ -149,6 +250,12 @@ def process_file(file_path, schema):
         dict: The extracted data on success.
         None: If loading, extraction, or JSON parsing fails. The specific
             error is written to stderr by the failing step.
+
+    Raises:
+        OSError: Propagated from load_file if the file cannot be read for
+            a reason other than being missing or a directory.
+        UnicodeDecodeError: Propagated from load_file if the file is not
+            valid text in the default encoding.
     """
     content = load_file(file_path)
     if content is None:
@@ -175,6 +282,13 @@ def process_folder(folder_path, schema):
         dict: Mapping of filename to extracted data for each file that
             processed successfully. Failed files are omitted.
         None: If the path is not a directory or contains no .txt files.
+
+    Raises:
+        OSError: If the directory cannot be listed, or propagated from
+            process_file if an individual file cannot be read for a reason
+            other than being missing or a directory.
+        UnicodeDecodeError: Propagated from process_file if a file is not
+            valid text in the default encoding.
     """
     if not os.path.isdir(folder_path):
         print(f"❌ Error: Not a directory: {folder_path}", file=sys.stderr)
@@ -202,54 +316,68 @@ def main():
     extracted data as pretty-printed JSON; folder mode prints one JSON
     object keyed by filename.
 
+    Args:
+        None. All inputs are read from the command line.
+
     Returns:
         None: This function terminates the process via sys.exit — exit
-            code 0 on success, 1 on any failure.
+            code 0 on success or Ctrl+C, 1 on any failure.
+
+    Raises:
+        SystemExit: Always. Exit code 0 on success or keyboard interrupt,
+            1 on any failure, 2 on a command-line usage error (raised by
+            argparse).
     """
-    parser = argparse.ArgumentParser(
-        description="Extract structured data from a document using the Gemini API."
-    )
-    parser.add_argument(
-        "file_pos",
-        nargs="?",
-        metavar="file",
-        help="Path to the input file to extract from",
-    )
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument(
-        "--file",
-        dest="file_opt",
-        metavar="FILE",
-        help="Path to the input file (alternative to the positional argument)",
-    )
-    group.add_argument(
-        "--folder", metavar="DIR", help="Directory of .txt files to batch-process"
-    )
-    parser.add_argument(
-        "--schema",
-        choices=["invoice", "receipt", "email"],
-        default="invoice",
-        help="Document schema to extract",
-    )
-    args = parser.parse_args()
-    if args.folder:
-        if args.file_pos:
-            parser.error("give either a file path or --folder, not both")
-        results = process_folder(args.folder, args.schema)
-        if not results:
+    try:
+        parser = argparse.ArgumentParser(
+            description="Extract structured data from a document using the Gemini API."
+        )
+        parser.add_argument(
+            "file_pos",
+            nargs="?",
+            metavar="file",
+            help="Path to the input file to extract from",
+        )
+        group = parser.add_mutually_exclusive_group()
+        group.add_argument(
+            "--file",
+            dest="file_opt",
+            metavar="FILE",
+            help="Path to the input file (alternative to the positional argument)",
+        )
+        group.add_argument(
+            "--folder", metavar="DIR", help="Directory of .txt files to batch-process"
+        )
+        parser.add_argument(
+            "--schema",
+            choices=["invoice", "receipt", "email"],
+            default="invoice",
+            help="Document schema to extract",
+        )
+        args = parser.parse_args()
+        if args.folder:
+            if args.file_pos:
+                parser.error("give either a file path or --folder, not both")
+            results = process_folder(args.folder, args.schema)
+            if not results:
+                sys.exit(1)
+            print(json.dumps(results, indent=2))
+            sys.exit(0)
+        file_path = args.file_opt or args.file_pos
+        if file_path is None:
+            parser.error("a file path is required (positional, --file, or --folder)")
+        if args.file_opt and args.file_pos:
+            parser.error(
+                "give the file path either positionally or via --file, not both"
+            )
+        data = process_file(file_path, args.schema)
+        if data is None:
             sys.exit(1)
-        print(json.dumps(results, indent=2))
+        print(json.dumps(data, indent=2))
         sys.exit(0)
-    file_path = args.file_opt or args.file_pos
-    if file_path is None:
-        parser.error("a file path is required (positional, --file, or --folder)")
-    if args.file_opt and args.file_pos:
-        parser.error("give the file path either positionally or via --file, not both")
-    data = process_file(file_path, args.schema)
-    if data is None:
-        sys.exit(1)
-    print(json.dumps(data, indent=2))
-    sys.exit(0)
+    except KeyboardInterrupt:
+        print("\n👋 Interrupted. Goodbye!")
+        sys.exit(0)
 
 
 if __name__ == "__main__":
