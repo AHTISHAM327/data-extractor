@@ -1,0 +1,27 @@
+ENTERPRISE SOFTWARE SOLUTIONS INC.
+Suite 900, 1 Financial Plaza, New York NY 10005
+
+TAX INVOICE
+
+Invoice No: ESS-2026-9912
+Invoice Date: April 1, 2026
+Payment Due: May 1, 2026
+
+Billed To:
+Acme Corporation
+procurement@acmecorp.com
+
+Description                              Amount
+-----------------------------------------------
+Enterprise License (50 seats, annual)   $45,000.00
+Premium Support Plan (1 year)            $8,500.00
+Onboarding & Training (5 days)           $6,250.00
+Data Migration Service                   $3,200.00
+-----------------------------------------------
+SUBTOTAL                                $62,950.00
+DISCOUNT (5%)                          -$3,147.50
+TAX (0%)                                    $0.00
+TOTAL DUE                               $59,802.50
+
+Wire transfer details on file.
+Net 30 terms apply.
