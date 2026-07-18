@@ -6,6 +6,8 @@
 
 Reads an unstructured text document — or a whole folder of them — and returns clean, typed JSON. Uses Google Gemini to understand context, normalize dates, and identify implicit fields. Returns `null` for missing values — never invents data.
 
+While a request is in flight, an animated `🔎 ⠋ extracting…` spinner is drawn on stderr — stdout stays pure, machine-readable JSON, so the tool is safe to pipe.
+
 **Built for:**
 - Finance teams extracting data from vendor invoices
 - E-commerce workflows parsing customer receipts
@@ -104,13 +106,17 @@ Please update the Q3 projections and get legal sign-off by EOD Thursday.
 | Missing API key | ❌ error to stderr, exit 1 |
 | Model busy or rate-limited | ⚠️ warning to stderr, automatically falls back to the next model |
 | All models busy | ❌ "Wait a minute" message, exit 1 |
-| Invalid schema | ❌ lists valid schemas, exit 1 |
+| Invalid schema | ❌ argparse lists the valid choices, exit 2 |
+| Model returns invalid JSON | ❌ first 120 chars of the bad response shown, exit 1 |
 | Missing field in document | Field is `null` in output — never hallucinated |
 | `--folder` path is not a directory | ❌ error to stderr, exit 1 |
 | `--folder` directory has no `.txt` files | ❌ error to stderr, exit 1 |
 | One file in a batch fails | ⚠️ warning to stderr, file skipped, batch continues |
 | Every file in a batch fails | ❌ exit 1 |
-| `--file` and `--folder` together | ❌ argparse error, exit 2 |
+| `--file` and `--folder` together (or a positional path with either) | ❌ argparse error, exit 2 |
+| Ctrl+C | 👋 clean goodbye — exit 0 mid-run, exit 130 if pressed during startup imports |
+
+**Exit codes:** `0` success (or Ctrl+C mid-run), `1` any extraction failure, `2` invalid arguments, `130` Ctrl+C during startup.
 
 ## Tech Stack
 
