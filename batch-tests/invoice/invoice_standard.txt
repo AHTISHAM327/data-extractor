@@ -1,0 +1,28 @@
+TechSupply Co.
+123 Industrial Park, Austin, TX 78701
+
+INVOICE
+
+Invoice Number: INV-2026-0042
+Date: June 3, 2026
+Payment Due: July 3, 2026
+
+Bill To:
+Omar Farooq
+omar.farooq@devstartup.io
+
+-------------------------------------------------
+ITEM                        QTY    UNIT    AMOUNT
+-------------------------------------------------
+Developer Workstation        1    $1,200.00  $1,200.00
+32GB RAM Upgrade             2      $89.00    $178.00
+1TB NVMe SSD                 1     $145.00    $145.00
+Shipping & Handling          1      $35.00     $35.00
+-------------------------------------------------
+SUBTOTAL                                  $1,558.00
+TAX (8.25%)                                $128.54
+TOTAL DUE                                $1,686.54
+-------------------------------------------------
+
+Payment accepted via bank transfer or check.
+Thank you for your business.

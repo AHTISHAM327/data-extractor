@@ -1,0 +1,9 @@
+INVOICE #INV-9901
+From: QuickFix IT Services
+To: Ali Hassan (ali.hassan@corp.pk)
+Date Issued: 2026-03-10
+Due: 2026-03-25
+
+This invoice covers monthly maintenance services for March 2026.
+
+Total Amount Due: $500.00

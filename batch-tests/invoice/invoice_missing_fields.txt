@@ -1,0 +1,11 @@
+INVOICE
+
+Vendor: Skyline Printers
+
+Items:
+- Business cards (500 pcs) — $45.00
+- Brochures (100 pcs) — $120.00
+
+TOTAL: $165.00
+
+Note: Customer info not provided. Payment on delivery.

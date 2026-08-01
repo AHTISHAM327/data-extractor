@@ -2,6 +2,8 @@ import argparse
 import os
 import sys
 import json
+import io
+import time
 import threading
 
 # The third-party imports (google-genai in particular) take over a
@@ -13,6 +15,8 @@ try:
     from dotenv import load_dotenv
     from google import genai
     from google.genai import errors as genai_errors
+    from google.genai import types
+    from pypdf import PdfReader
     from prompts import get_extract_prompt
 except KeyboardInterrupt:
     print("\n👋 Extraction cancelled. Goodbye!", file=sys.stderr)
@@ -24,26 +28,89 @@ load_dotenv()
 MODEL_NAMES = ["gemini-3.1-flash-lite", "gemini-2.0-flash-lite", "gemini-2.0-flash"]
 
 
-def load_file(file_path):
-    """Load text content from a file on disk.
+def _load_pdf(file_path, data):
+    """Turn raw PDF bytes into extractable text or a Gemini-native payload.
 
-    Validates that the path exists, points to a regular file, and that the
-    file contains non-whitespace content before returning it.
+    Attempts to pull a text layer out of the PDF with pypdf. Text-layer PDFs
+    yield usable text and take the ordinary text path. Image-based/scanned
+    PDFs (and PDFs pypdf cannot parse) extract no real text, so the raw bytes
+    are handed back to be passed to Gemini directly as inline file data.
+
+    Args:
+        file_path (str): Path to the PDF, used only for status/error messages.
+        data (bytes): The full raw bytes of the PDF file.
+
+    Returns:
+        tuple[str, bytes | None]: A ``(text, pdf_bytes)`` pair. For a
+            text-layer PDF, ``text`` holds the extracted text and
+            ``pdf_bytes`` is None. For a scanned/image-based PDF, ``text`` is
+            an empty string and ``pdf_bytes`` holds the raw bytes for
+            Gemini's multimodal input.
+        None: If the PDF is empty (zero bytes). A descriptive error message
+            is written to stderr.
+
+    Raises:
+        Does not raise. pypdf parsing failures are caught and fall back to
+        the Gemini-native path.
+    """
+    if not data:
+        print("❌ Error: File is empty.", file=sys.stderr)
+        return None
+    text = ""
+    try:
+        reader = PdfReader(io.BytesIO(data))
+        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    except Exception:
+        # A corrupt or unreadable text layer is not fatal: let Gemini try to
+        # read the PDF natively rather than failing the whole run here.
+        text = ""
+    if text.strip():
+        print(f"📄 Loaded: {file_path} (text-layer PDF, {len(text)} chars)")
+        return text, None
+    print(
+        f"📄 Loaded: {file_path} "
+        f"(scanned PDF, {len(data)} bytes → Gemini native)"
+    )
+    return "", data
+
+
+def load_file(file_path):
+    """Load a document from disk as text or a Gemini-native PDF payload.
+
+    Plain-text files and text-layer PDFs are returned as text. Image-based or
+    scanned PDFs — those pypdf cannot extract real text from — are returned as
+    raw bytes so they can be passed to Gemini directly as inline file data.
+    The correct case is detected by extension and, for PDFs, by whether pypdf
+    extracts any non-whitespace text.
 
     Args:
         file_path (str): Path to the input file to read.
 
     Returns:
-        str: The full text content of the file on success.
+        tuple[str, bytes | None]: A ``(text, pdf_bytes)`` pair on success. For
+            text input (plain text or a text-layer PDF), ``text`` holds the
+            content and ``pdf_bytes`` is None. For a scanned/image-based PDF,
+            ``text`` is empty and ``pdf_bytes`` holds the raw PDF bytes.
         None: If the file is missing, is a directory, or is empty. A
             descriptive error message is written to stderr in each case.
 
     Raises:
         OSError: If the file cannot be read for a reason other than being
             missing or a directory (e.g. a permission error).
-        UnicodeDecodeError: If the file is not valid text in the default
-            encoding.
+        UnicodeDecodeError: If a non-PDF file is not valid text in the
+            default encoding.
     """
+    if file_path.lower().endswith(".pdf"):
+        try:
+            with open(file_path, "rb") as f:
+                data = f.read()
+        except FileNotFoundError:
+            print(f"❌ Error: File not found: {file_path}", file=sys.stderr)
+            return None
+        except IsADirectoryError:
+            print(f"❌ Error: {file_path} is a directory, not a file.", file=sys.stderr)
+            return None
+        return _load_pdf(file_path, data)
     try:
         with open(file_path, "r") as f:
             content = f.read()
@@ -57,7 +124,7 @@ def load_file(file_path):
         print("❌ Error: File is empty.", file=sys.stderr)
         return None
     print(f"📄 Loaded: {file_path} ({len(content)} chars)")
-    return content
+    return content, None
 
 
 def _spin(stop: threading.Event) -> None:
@@ -127,20 +194,27 @@ def _stop_spinner(stop: threading.Event, thread: threading.Thread) -> None:
     thread.join()
 
 
-def extract_data(text, schema: str = "invoice"):
-    """Send text to the Gemini API for structured data extraction.
+def extract_data(text, schema: str = "invoice", pdf_bytes=None):
+    """Send a document to the Gemini API for structured data extraction.
 
     Builds the extraction prompt via get_extract_prompt for the selected
     schema and calls the Gemini models listed in MODEL_NAMES in order,
     falling back to the next model when one is overloaded or rate-limited.
-    All API, network, and configuration failures are handled internally and
-    reported to stderr.
+    When pdf_bytes is provided (a scanned/image-based PDF with no extractable
+    text layer), the raw PDF is attached to the request as inline file data so
+    Gemini reads it directly via its multimodal input; otherwise the text is
+    embedded in the prompt as usual. All API, network, and configuration
+    failures are handled internally and reported to stderr.
 
     Args:
-        text (str): The raw document text to extract data from.
+        text (str): The raw document text to extract data from. Empty when a
+            scanned PDF is supplied via pdf_bytes.
         schema (str): The document schema that controls which extraction
             prompt is used and which fields are extracted. One of
             "invoice", "receipt", or "email". Defaults to "invoice".
+        pdf_bytes (bytes | None): Raw bytes of a scanned/image-based PDF to
+            pass to Gemini as inline "application/pdf" file data. When None,
+            extraction runs from ``text`` alone. Defaults to None.
 
     Returns:
         str: The stripped raw response text from the model on success.
@@ -163,12 +237,21 @@ def extract_data(text, schema: str = "invoice"):
     except ValueError as e:
         print(f"❌ Error: {e}", file=sys.stderr)
         return None
+    if pdf_bytes is not None:
+        contents = [
+            prompt,
+            types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
+        ]
+    else:
+        contents = prompt
     client = genai.Client(api_key=api_key)
     response = None
     for model_name in MODEL_NAMES:
         stop, spinner = _start_spinner()
         try:
-            response = client.models.generate_content(model=model_name, contents=prompt)
+            response = client.models.generate_content(
+                model=model_name, contents=contents
+            )
             break
         except genai_errors.ClientError as e:
             _stop_spinner(stop, spinner)
@@ -254,34 +337,38 @@ def process_file(file_path, schema):
     Raises:
         OSError: Propagated from load_file if the file cannot be read for
             a reason other than being missing or a directory.
-        UnicodeDecodeError: Propagated from load_file if the file is not
-            valid text in the default encoding.
+        UnicodeDecodeError: Propagated from load_file if a non-PDF file is
+            not valid text in the default encoding.
     """
-    content = load_file(file_path)
-    if content is None:
+    loaded = load_file(file_path)
+    if loaded is None:
         return None
-    raw = extract_data(content, schema=schema)
+    text, pdf_bytes = loaded
+    raw = extract_data(text, schema=schema, pdf_bytes=pdf_bytes)
     if raw is None:
         return None
     return parse_json(raw)
 
 
 def process_folder(folder_path, schema):
-    """Batch-process every .txt file in a directory.
+    """Batch-process every .txt and .pdf file in a directory.
 
     Runs the same extraction pipeline as single-file mode on each .txt
-    file found (sorted by name). Errors on individual files are written
-    to stderr and the batch continues with the remaining files.
+    and .pdf file found (sorted by name). A one-second delay is inserted
+    between files to stay under Gemini's rate limit on large batches.
+    Errors on individual files are written to stderr and the batch
+    continues with the remaining files.
 
     Args:
-        folder_path (str): Path to the directory containing .txt files.
+        folder_path (str): Path to the directory containing .txt/.pdf files.
         schema (str): The document schema to extract. One of "invoice",
             "receipt", or "email".
 
     Returns:
         dict: Mapping of filename to extracted data for each file that
             processed successfully. Failed files are omitted.
-        None: If the path is not a directory or contains no .txt files.
+        None: If the path is not a directory or contains no .txt/.pdf
+            files.
 
     Raises:
         OSError: If the directory cannot be listed, or propagated from
@@ -293,12 +380,19 @@ def process_folder(folder_path, schema):
     if not os.path.isdir(folder_path):
         print(f"❌ Error: Not a directory: {folder_path}", file=sys.stderr)
         return None
-    txt_files = sorted(f for f in os.listdir(folder_path) if f.endswith(".txt"))
-    if not txt_files:
-        print(f"❌ Error: No .txt files found in {folder_path}", file=sys.stderr)
+    files = sorted(
+        f for f in os.listdir(folder_path) if f.endswith((".txt", ".pdf"))
+    )
+    if not files:
+        print(f"❌ Error: No .txt or .pdf files found in {folder_path}", file=sys.stderr)
         return None
     results = {}
-    for filename in txt_files:
+    for i, filename in enumerate(files):
+        # Space out requests so a large batch doesn't trip Gemini's rate
+        # limit. Sleep between files only, not before the first or after
+        # the last.
+        if i > 0:
+            time.sleep(1)
         data = process_file(os.path.join(folder_path, filename), schema)
         if data is None:
             print(f"⚠️  Skipping {filename}: extraction failed.", file=sys.stderr)

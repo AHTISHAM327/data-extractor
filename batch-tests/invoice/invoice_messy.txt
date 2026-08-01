@@ -1,0 +1,13 @@
+=== VENDOR: Bright Horizons Consulting LLC ===
+ref# BHC/2026/0089   |  raised on: 15th Jan 2026   |   payment by: 14 FEB 2026
+
+CLIENT: Priya Nair   <p.nair@finbridge.net>
+
+Services rendered:
+-- API Integration audit ... 3,200.00
+-- Code review session (2hrs) ... 400.00
+-- Travel reimbursement ... 87.50
+
+Grand Total = $3,687.50 USD
+
+Please remit via wire. Late fee applies after due date.

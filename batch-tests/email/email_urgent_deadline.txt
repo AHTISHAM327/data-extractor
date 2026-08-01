@@ -1,0 +1,17 @@
+From: Marcus Webb <m.webb@globalops.com>
+To: ahtisham.nbc@gmail.com
+Date: July 15, 2026
+Subject: URGENT: Server Migration Sign-off Needed
+
+Hi Ahtisham,
+
+We're moving our production servers to the new data center this Friday (July 18).
+I need you to:
+1. Review and approve the migration checklist by EOD tomorrow
+2. Confirm your team's availability for the 2am maintenance window
+3. Send me the rollback credentials before Thursday noon
+
+This is blocking our entire DevOps team. Please treat as top priority.
+
+Thanks,
+Marcus

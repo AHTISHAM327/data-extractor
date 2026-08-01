@@ -1,0 +1,18 @@
+From: Sana Mirza <sana.mirza@projectalpha.io>
+To: dev-team@projectalpha.io
+Date: June 28, 2026
+Subject: Sprint 14 Kickoff — Action Items
+
+Team,
+
+Following today's standup, here's what everyone needs to do before the sprint ends July 5th:
+
+- Ahtisham: complete the data pipeline integration with the new API
+- Raza: write unit tests for the auth module (target 80% coverage)
+- Zara: update the staging environment Docker configs
+- Everyone: review the updated PRD doc and add comments by July 1st
+- Sana (me): schedule client demo call for July 7th
+
+If you're blocked on anything, ping me on Slack immediately.
+
+Sana
