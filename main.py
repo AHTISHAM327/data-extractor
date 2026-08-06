@@ -381,7 +381,7 @@ def process_folder(folder_path, schema):
         print(f"❌ Error: Not a directory: {folder_path}", file=sys.stderr)
         return None
     files = sorted(
-        f for f in os.listdir(folder_path) if f.endswith((".txt", ".pdf"))
+        f for f in os.listdir(folder_path) if f.lower().endswith((".txt", ".pdf"))
     )
     if not files:
         print(f"❌ Error: No .txt or .pdf files found in {folder_path}", file=sys.stderr)
