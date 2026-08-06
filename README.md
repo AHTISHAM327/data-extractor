@@ -54,13 +54,13 @@ python3 main.py --file email.txt --schema email
 # The file path also works as a positional argument
 python3 main.py invoice.txt
 
-# Batch mode: process every .txt file in a directory
+# Batch mode: process every .txt/.pdf file in a directory
 python3 main.py --folder ./invoices --schema invoice
 ```
 
 ### Batch Mode (`--folder`)
 
-`--folder` runs the same extraction pipeline on every `.txt` file in a directory (sorted by name) and prints a single JSON object keyed by filename:
+`--folder` runs the same extraction pipeline on every `.txt` and `.pdf` file in a directory (matched case-insensitively, so `.TXT`/`.PDF` work too; sorted by name) and prints a single JSON object keyed by filename:
 
 ```json
 {
@@ -110,7 +110,7 @@ Please update the Q3 projections and get legal sign-off by EOD Thursday.
 | Model returns invalid JSON | ❌ first 120 chars of the bad response shown, exit 1 |
 | Missing field in document | Field is `null` in output — never hallucinated |
 | `--folder` path is not a directory | ❌ error to stderr, exit 1 |
-| `--folder` directory has no `.txt` files | ❌ error to stderr, exit 1 |
+| `--folder` directory has no `.txt`/`.pdf` files | ❌ error to stderr, exit 1 |
 | One file in a batch fails | ⚠️ warning to stderr, file skipped, batch continues |
 | Every file in a batch fails | ❌ exit 1 |
 | `--file` and `--folder` together (or a positional path with either) | ❌ argparse error, exit 2 |
@@ -128,18 +128,35 @@ Please update the Q3 projections and get legal sign-off by EOD Thursday.
 
 ```
 data-extractor/
-├── main.py              # CLI + core extraction logic
-├── prompts.py           # Schema-specific extraction prompts
+├── main.py                # CLI + core extraction logic
+├── prompts.py             # Schema-specific extraction prompts
+├── test_extractor.py      # Regression tests — .venv/bin/pytest test_extractor.py -v
 ├── requirements.txt
-├── .env.example         # Copy to .env and add your key
+├── .env.example           # Copy to .env and add your key
 ├── .gitignore
-├── sample_invoice.txt   # Invoice test file
-├── test_receipt.txt     # Receipt test file
-├── test_email.txt       # Email test file
+├── sample_invoice.txt     # Invoice test file
+├── test_receipt.txt       # Receipt test file
+├── test_email.txt         # Email test file
 └── data-extractor-tests/  # 17 edge-case test documents (all schemas)
 ```
 
 ## Testing
+
+**Automated regression tests:**
+
+```bash
+.venv/bin/pytest test_extractor.py -v
+```
+
+11 tests covering: `load_file()`'s empty-file handling, a real (unmocked) end-to-end
+regression against a scanned invoice PDF, mixed `.txt`/`.pdf` batch processing,
+case-insensitive file matching in `--folder` (fixed; was case-sensitive and could
+silently skip files like `Invoice.PDF`, or report "no files found" if that was
+the only file), invalid-JSON handling, missing/invalid schema and API-key
+short-circuits (asserting no client is ever constructed), corrupt-PDF fallback to
+native text, and the model-fallback loop on a 429 rate-limit response.
+
+**Manual document testing:**
 
 The `data-extractor-tests/` folder contains 17 test documents named `<schema>_<scenario>.txt`, covering standard cases and edge cases (missing fields, messy formatting, foreign currency, no line items).
 
